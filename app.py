@@ -19,7 +19,7 @@ load_dotenv()
 openai.api_type = "azure"
 openai.api_base = "https://arlotest.openai.azure.com/"
 openai.api_version = "2023-05-15"
-openai.api_key = st.secrets["AZURE_OPENAI_API_KEY"]
+openai.api_key = st.secrets[AZURE_OPENAI_API_KEY]
 
 embedding_deployment = "text-embedding-ada-002-test1"
 chat_deployment = "gpt-4-cedo"
