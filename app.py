@@ -67,6 +67,9 @@ def find_top_chunks(question, embedded_chunks, top_k=3):
 
 def ask_question(question, embedded_chunks):
     top_chunks = find_top_chunks(question, embedded_chunks)
+    if not top_chunks:
+        return ("⚠️ No relevant content found in the uploaded documents. Please rephrase your question or upload more detailed files.", [])
+
     context = "\n\n".join([c[0] for c in top_chunks])
     sources = [(c[1], c[2]) for c in top_chunks]
     prompt = f"""You are an assistant. Answer the question using only the following content:
@@ -75,33 +78,47 @@ def ask_question(question, embedded_chunks):
 
 Question: {question}
 Answer:"""
-    response = openai.ChatCompletion.create(
-        deployment_id=chat_deployment,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2,
-        max_tokens=700
-    )
-    return response["choices"][0]["message"]["content"], sources
+
+    try:
+        response = openai.ChatCompletion.create(
+            deployment_id=chat_deployment,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=700
+        )
+        return response["choices"][0]["message"]["content"], sources
+
+    except openai.error.InvalidRequestError as e:
+        if "content management policy" in str(e):
+            return ("⚠️ Your question may have triggered Azure OpenAI's content filtering policy. Please rephrase your question.", [])
+        else:
+            raise e
 
 # === Streamlit UI ===
-st.set_page_config(page_title="📁 Document Assistant", layout="wide")
-st.title(" Document Assistant")
-st.markdown("Ask questions based on uploaded documents (PDF, Word, Excel). Upload confidential documents securely.")
+st.set_page_config(page_title="📁 Document Q&A Chatbot", layout="wide")
+st.title("📄 Smart Document Assistant")
+st.markdown("""
+Upload PDF, Word, or Excel documents and ask any questions about their contents.
 
-# Disclaimer
-st.info("⚠️ **Disclaimer**: Uploaded documents are processed in memory and never saved. Your data remains private.")
+**Disclaimer:** Uploaded documents are processed in-memory and are **not saved or stored**.
+""")
 
-# Predefined Prompts
-example_questions = [
-    "What is the summary of this document?",
-    "What are the key points or highlights?",
-    "Are there any important dates or deadlines mentioned?",
-    "Who are the main people or organizations involved?",
-    "What actions or decisions are recommended or required?"
+# Predefined prompts
+predefined_prompts = [
+    "What is the main topic of the document?",
+    "Summarize this document in a few bullet points.",
+    "Are there any important deadlines or dates mentioned?",
+    "What are the key decisions or actions discussed?",
+    "Who are the main parties involved in the document?"
 ]
+
+st.markdown("**Try one of the following suggested prompts:**")
+for prompt in predefined_prompts:
+    if st.button(prompt):
+        st.session_state["question_input"] = prompt
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -109,12 +126,14 @@ if "embedded_chunks" not in st.session_state:
     st.session_state.embedded_chunks = []
 if "files_processed" not in st.session_state:
     st.session_state.files_processed = set()
+if "question_input" not in st.session_state:
+    st.session_state["question_input"] = ""
 
-uploaded_files = st.file_uploader("📄 Upload documents", type=["pdf", "docx", "xlsx"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("📤 Upload documents", type=["pdf", "docx", "xlsx"], accept_multiple_files=True)
 if uploaded_files:
     new_files = [f for f in uploaded_files if f.name not in st.session_state.files_processed]
     if new_files:
-        with st.spinner("Processing uploaded files..."):
+        with st.spinner("🔍 Processing uploaded files..."):
             for file in new_files:
                 text = extract_text(file)
                 chunks = chunk_text(text)
@@ -127,25 +146,17 @@ if uploaded_files:
                         "page": i + 1
                     })
                 st.session_state.files_processed.add(file.name)
-        st.success("✅ New files processed successfully!")
+        st.success("✅ Files processed successfully!")
 
-# Show predefined prompts
-with st.expander("💡 Try an example question"):
-    for prompt in example_questions:
-        if st.button(prompt):
-            st.session_state.selected_prompt = prompt
-            st.experimental_rerun()
-
-# Main Q&A input
 with st.form("ask_form", clear_on_submit=True):
-    question = st.text_input("💬 Ask your question:", key="question_input", value=st.session_state.get("selected_prompt", ""))
+    question = st.text_input("💬 Ask a question about the uploaded documents:", value=st.session_state["question_input"])
     submitted = st.form_submit_button("Ask")
 
 if submitted and question:
     if not st.session_state.embedded_chunks:
         st.warning("⚠️ Please upload documents first.")
     else:
-        with st.spinner("Thinking..."):
+        with st.spinner("🤖 Generating response..."):
             try:
                 answer, sources = ask_question(question, st.session_state.embedded_chunks)
                 st.session_state.chat_history.append({
@@ -153,7 +164,6 @@ if submitted and question:
                     "answer": answer,
                     "sources": sources
                 })
-                st.session_state.selected_prompt = ""
             except Exception as e:
                 st.error(f"❌ Error: {e}")
 
@@ -162,14 +172,14 @@ if st.button("🗑️ Clear Chat"):
     st.session_state.chat_history = []
     st.session_state.embedded_chunks = []
     st.session_state.files_processed = set()
-    st.session_state.selected_prompt = ""
     st.success("🧹 Chat history cleared!")
 
 # === Show history ===
 for idx, entry in enumerate(reversed(st.session_state.chat_history)):
     st.markdown(f"### 🔹 Q{len(st.session_state.chat_history)-idx}: {entry['question']}")
     st.write(entry["answer"])
-    st.markdown("📚 **Sources:**")
-    for filename, page in entry["sources"]:
-        st.markdown(f"- **{filename}**, Page {page}")
+    if entry["sources"]:
+        st.markdown("📚 **Sources:**")
+        for filename, page in entry["sources"]:
+            st.markdown(f"- **{filename}**, Page {page}")
     st.markdown("---")
