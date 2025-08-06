@@ -78,7 +78,7 @@ Answer:"""
     response = openai.ChatCompletion.create(
         deployment_id=chat_deployment,
         messages=[
-            {"role": "system", "content": "You are a helpful  assistant."},
+            {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.2,
@@ -87,9 +87,21 @@ Answer:"""
     return response["choices"][0]["message"]["content"], sources
 
 # === Streamlit UI ===
-st.set_page_config(page_title="📁 Document summary Chatbot", layout="centered")
-st.title("⚖️  Document Assistant")
-st.markdown("Ask questions based on uploaded  documents (PDF, Word, Excel).")
+st.set_page_config(page_title="📁 Document Assistant", layout="wide")
+st.title(" Document Assistant")
+st.markdown("Ask questions based on uploaded documents (PDF, Word, Excel). Upload confidential documents securely.")
+
+# Disclaimer
+st.info("⚠️ **Disclaimer**: Uploaded documents are processed in memory and never saved. Your data remains private.")
+
+# Predefined Prompts
+example_questions = [
+    "What is the summary of this document?",
+    "What are the key points or highlights?",
+    "Are there any important dates or deadlines mentioned?",
+    "Who are the main people or organizations involved?",
+    "What actions or decisions are recommended or required?"
+]
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -117,8 +129,16 @@ if uploaded_files:
                 st.session_state.files_processed.add(file.name)
         st.success("✅ New files processed successfully!")
 
+# Show predefined prompts
+with st.expander("💡 Try an example question"):
+    for prompt in example_questions:
+        if st.button(prompt):
+            st.session_state.selected_prompt = prompt
+            st.experimental_rerun()
+
+# Main Q&A input
 with st.form("ask_form", clear_on_submit=True):
-    question = st.text_input("💬 Ask your question:", key="question_input")
+    question = st.text_input("💬 Ask your question:", key="question_input", value=st.session_state.get("selected_prompt", ""))
     submitted = st.form_submit_button("Ask")
 
 if submitted and question:
@@ -133,6 +153,7 @@ if submitted and question:
                     "answer": answer,
                     "sources": sources
                 })
+                st.session_state.selected_prompt = ""
             except Exception as e:
                 st.error(f"❌ Error: {e}")
 
@@ -141,11 +162,12 @@ if st.button("🗑️ Clear Chat"):
     st.session_state.chat_history = []
     st.session_state.embedded_chunks = []
     st.session_state.files_processed = set()
+    st.session_state.selected_prompt = ""
     st.success("🧹 Chat history cleared!")
 
 # === Show history ===
 for idx, entry in enumerate(reversed(st.session_state.chat_history)):
-    st.markdown(f"### 🧠 Q{len(st.session_state.chat_history)-idx}: {entry['question']}")
+    st.markdown(f"### 🔹 Q{len(st.session_state.chat_history)-idx}: {entry['question']}")
     st.write(entry["answer"])
     st.markdown("📚 **Sources:**")
     for filename, page in entry["sources"]:
